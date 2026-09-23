@@ -106,17 +106,33 @@ public class HeartbeatWatcherTests
         using var server = new BeaconServer(port: 0, queueCapacity: 4);
         server.Start();
 
-        // A client that connects and never reads: the pump fills the OS buffer, then the bounded
-        // queue overflows and the server drops for it. Closing it afterwards latches those drops on
-        // the server and guarantees no NEW drops can occur while the heartbeats are observed.
+        // A client that connects and never reads: once the OS socket buffers are full the pump
+        // blocks, the bounded queue overflows, and the server drops for it. How much the buffers
+        // absorb first is the OS's business (Windows auto-tunes loopback buffers, and a CI runner
+        // took more than 20 MB without dropping), so send until drops are observed rather than
+        // guessing a volume.
         var stalled = new TcpClient();
         await stalled.ConnectAsync("127.0.0.1", server.Port);
         while (server.ClientCount == 0) await Task.Delay(5);
         var pad = new string('x', 4000);
-        for (var i = 0; i < 5_000; i++) server.Broadcast("heartbeat", new { i, pad });
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (server.DroppedTotal == 0 && DateTime.UtcNow < deadline)
+        {
+            for (var i = 0; i < 1_000; i++) server.Broadcast("heartbeat", new { i, pad });
+            await Task.Delay(10);
+        }
+        Assert.True(server.DroppedTotal > 0, "the stalled client never caused a drop");
+
+        // Closing it latches those drops on the server and guarantees no NEW drops can occur while
+        // the heartbeats are observed. The server only learns a client is gone when it next writes
+        // to it (in production, the next heartbeat), so keep offering it small messages until then.
         stalled.Close();
-        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
-        while (server.ClientCount > 0 && DateTime.UtcNow < deadline) await Task.Delay(10);
+        deadline = DateTime.UtcNow + TimeSpan.FromSeconds(10);
+        while (server.ClientCount > 0 && DateTime.UtcNow < deadline)
+        {
+            server.Broadcast("heartbeat", new { probe = true });
+            await Task.Delay(10);
+        }
         Assert.Equal(0, server.ClientCount);
 
         using var reader = new WireReader();

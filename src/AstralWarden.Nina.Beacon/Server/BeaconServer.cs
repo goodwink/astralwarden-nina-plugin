@@ -163,6 +163,22 @@ public sealed class BeaconServer : IDisposable
         }
     }
 
+    /// <summary>Total messages dropped across all clients, ever. Read-only; tests wait on it without
+    /// consuming the heartbeat's since-last counter.</summary>
+    internal long DroppedTotal
+    {
+        get
+        {
+            long total = Interlocked.Read(ref _droppedFromClosed);
+            lock (_gate)
+            {
+                foreach (var client in _clients)
+                    total += client.Dropped;
+            }
+            return total;
+        }
+    }
+
     /// <summary>Total messages dropped across all clients since the last call (for heartbeat).</summary>
     public long TakeDroppedSinceLast()
     {
