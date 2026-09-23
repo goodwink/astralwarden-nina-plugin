@@ -1,0 +1,22 @@
+<Project>
+  <PropertyGroup>
+    <!--
+      Single source of the Beacon's version. Stamps AssemblyVersion/FileVersion (see the plugin
+      csproj, which lets the SDK generate the version attributes and keeps only the NINA manifest
+      metadata hand-written in AssemblyInfo.cs).
+
+      BUMP THIS FOR EVERY BUILD YOU INSTALL ON A RIG. Same discipline as the agent's
+      <AgentVersion>, for the same reason: NINA compares AssemblyVersion to decide whether a plugin
+      folder holds a newer build, so two different builds sharing one version means the rig can keep
+      running the old DLL while the version it reports says otherwise.
+    -->
+    <BeaconVersion>1.3.2.0</BeaconVersion>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- NU1701: NINA's own transitive deps (ToastNotifications, VVVV.FreeImage) are net48-only
+         packages; NINA ships and loads them fine at runtime. Not ours to fix. -->
+    <NoWarn>$(NoWarn);NU1701</NoWarn>
+  </PropertyGroup>
+</Project>

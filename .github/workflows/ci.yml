@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # Windows is not a preference: the plugin targets net8.0-windows with UseWPF (NINA hosts it in
+    # a WPF app), so it cannot build anywhere else. Builds from NuGet alone — no NINA install.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build
+        run: dotnet build AstralWarden.Nina.Beacon.sln --configuration Release
+
+      - name: Test
+        run: dotnet test AstralWarden.Nina.Beacon.sln --configuration Release --no-build

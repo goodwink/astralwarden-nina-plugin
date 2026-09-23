@@ -1,0 +1,36 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{E57D9DDB-A2EE-4C96-8C5E-9FA93B66A10A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AstralWarden.Nina.Beacon", "src\AstralWarden.Nina.Beacon\AstralWarden.Nina.Beacon.csproj", "{88167E90-80DA-4487-9B33-1B672ADFD86E}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{C1BCE5D9-C559-4324-93A6-EF30BBF4DA10}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AstralWarden.Nina.Beacon.Tests", "tests\AstralWarden.Nina.Beacon.Tests\AstralWarden.Nina.Beacon.Tests.csproj", "{58CEAC86-C530-40E4-81B2-81054CD06ED2}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{88167E90-80DA-4487-9B33-1B672ADFD86E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{88167E90-80DA-4487-9B33-1B672ADFD86E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{88167E90-80DA-4487-9B33-1B672ADFD86E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{88167E90-80DA-4487-9B33-1B672ADFD86E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{58CEAC86-C530-40E4-81B2-81054CD06ED2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{58CEAC86-C530-40E4-81B2-81054CD06ED2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{58CEAC86-C530-40E4-81B2-81054CD06ED2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{58CEAC86-C530-40E4-81B2-81054CD06ED2}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{88167E90-80DA-4487-9B33-1B672ADFD86E} = {E57D9DDB-A2EE-4C96-8C5E-9FA93B66A10A}
+		{58CEAC86-C530-40E4-81B2-81054CD06ED2} = {C1BCE5D9-C559-4324-93A6-EF30BBF4DA10}
+	EndGlobalSection
+EndGlobal

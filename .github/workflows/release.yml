@@ -1,0 +1,180 @@
+# Build and release the plugin, then stage its NINA manifest.
+#
+# Adapted from the official template, tools/github-action.yaml in isbeorn/nina.plugin.manifests.
+# Where this file differs from the template, the reason is noted inline.
+#
+# Trigger: push a tag equal to <BeaconVersion> in Directory.Build.props, e.g. `1.2.3.0`.
+# One-time setup:
+#   - Settings → Actions → General → Workflow permissions: "Read and write permissions".
+#   - A fork of isbeorn/nina.plugin.manifests named exactly `nina.plugin.manifests`, and a
+#     fine-grained PAT with Contents: write on that fork only, stored as the secret `PAT`.
+#     Without the secret, the release still publishes and only the manifest staging is skipped.
+name: Release
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+env:
+  PLUGIN_NAME: "Astral Warden Beacon"
+  PLUGIN_SLN_NAME: "AstralWarden.Nina.Beacon"
+  PLUGIN_PROJECT: "src/AstralWarden.Nina.Beacon/AstralWarden.Nina.Beacon.csproj"
+  PLUGIN_DLL_NAME: "AstralWarden.Nina.Beacon"
+  # Pinned rather than refs/heads/main so an upstream change can't silently alter a release.
+  # Bump it deliberately after reading the upstream diff.
+  CREATE_MANIFEST_URL: "https://raw.githubusercontent.com/isbeorn/nina.plugin.manifests/d8d9b9207ac7e10ba3c2ba7ef791f8c0ab751d9e/tools/CreateManifest.ps1"
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+
+      # Not in the template: a release must never ship red.
+      - name: Test
+        run: dotnet test "${{ env.PLUGIN_SLN_NAME }}.sln" --configuration Release
+
+      # The template builds the solution with -o, which would mix the test project's output into
+      # the package folder, and passes -p:Version=<tag>, which would let the tag override the
+      # source. Build only the plugin project; the version comes from Directory.Build.props.
+      - name: Build
+        run: dotnet build "${{ env.PLUGIN_PROJECT }}" --configuration Release -o ./bin/Release
+
+      # A rig that builds from source at this tag must get the same version NINA sees in the
+      # manifest, so the tag has to equal <BeaconVersion> rather than replace it.
+      - name: Check tag matches the built version
+        shell: pwsh
+        run: |
+          $built = (Get-Item "bin/Release/${{ env.PLUGIN_DLL_NAME }}.dll").VersionInfo.FileVersion
+          if ($built -ne "${{ github.ref_name }}") {
+            Write-Error "Tag ${{ github.ref_name }} does not match the built FileVersion $built. Set <BeaconVersion> in Directory.Build.props to the tag, commit, and tag that commit."
+            exit 1
+          }
+          Write-Output "Tag and built FileVersion agree: $built"
+
+      - name: Prepare package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force "packages/${{ env.PLUGIN_NAME }}" | Out-Null
+          Copy-Item "bin/Release/${{ env.PLUGIN_DLL_NAME }}.dll" "packages/${{ env.PLUGIN_NAME }}/" -Force
+          Copy-Item "bin/Release/${{ env.PLUGIN_DLL_NAME }}.pdb" "packages/${{ env.PLUGIN_NAME }}/" -Force
+
+      # The zip is built, hashed and uploaded from the same bytes in this one job. It must never
+      # be rebuilt or replaced afterwards: the manifest pins its checksum.
+      - name: Create plugin archive and manifest
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "${{ env.CREATE_MANIFEST_URL }}" -OutFile CreateManifest.ps1
+          pwsh ./CreateManifest.ps1 -file "packages/${{ env.PLUGIN_NAME }}/${{ env.PLUGIN_DLL_NAME }}.dll" -installerUrl "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/${{ env.PLUGIN_DLL_NAME }}.${{ github.ref_name }}.zip" -createArchive -includeAll
+          Rename-Item -Path "manifest.json" -NewName "${{ env.PLUGIN_DLL_NAME }}.${{ github.ref_name }}.manifest.json"
+          Rename-Item -Path "${{ env.PLUGIN_DLL_NAME }}.zip" -NewName "${{ env.PLUGIN_DLL_NAME }}.${{ github.ref_name }}.zip"
+
+      # Not in the template: release notes come from this version's CHANGELOG.md section, and a
+      # release without one fails rather than shipping with empty notes.
+      - name: Extract release notes
+        shell: pwsh
+        run: |
+          $text = Get-Content CHANGELOG.md -Raw
+          $pattern = '(?ms)^## ' + [regex]::Escape("${{ github.ref_name }}") + '\s*$\r?\n(.*?)(?=^## |\z)'
+          $m = [regex]::Match($text, $pattern)
+          if (-not $m.Success -or [string]::IsNullOrWhiteSpace($m.Groups[1].Value)) {
+            Write-Error "CHANGELOG.md has no '## ${{ github.ref_name }}' section with content."
+            exit 1
+          }
+          $m.Groups[1].Value.Trim() | Out-File release-notes.md -Encoding utf8
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Astral Warden Beacon ${{ github.ref_name }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          files: |
+            ./${{ env.PLUGIN_DLL_NAME }}.${{ github.ref_name }}.zip
+            ./${{ env.PLUGIN_DLL_NAME }}.${{ github.ref_name }}.manifest.json
+
+      - name: Upload manifest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-manifest
+          path: ${{ env.PLUGIN_DLL_NAME }}.${{ github.ref_name }}.manifest.json
+
+  # The template's publish job also opens the pull request on isbeorn/nina.plugin.manifests.
+  # This one stops at pushing a branch to our fork: the manifest repo requires an accountable human
+  # maintainer, so the maintainer opens that PR himself.
+  stage-manifest:
+    runs-on: ubuntu-latest
+    needs: build-and-release
+    steps:
+      - name: Check for the fork token
+        id: token
+        env:
+          PAT: ${{ secrets.PAT }}
+        run: |
+          if [ -z "$PAT" ]; then
+            echo "::notice::No PAT secret, so the manifest was not staged. The release itself is published."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download manifest artifact
+        if: steps.token.outputs.present == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: plugin-manifest
+
+      - uses: actions/setup-node@v4
+        if: steps.token.outputs.present == 'true'
+        with:
+          node-version: 20
+
+      # The branch starts from upstream main, not from the fork's main, which is probably stale.
+      # That way the PR contains exactly one commit, and the upstream check (which only looks at
+      # HEAD~1..HEAD) sees the manifest.
+      - name: Commit manifest to a fork branch
+        if: steps.token.outputs.present == 'true'
+        env:
+          PAT: ${{ secrets.PAT }}
+        run: |
+          set -euo pipefail
+          VERSION="${{ github.ref_name }}"
+          SRC="$PWD/${{ env.PLUGIN_DLL_NAME }}.$VERSION.manifest.json"
+          MIN_APP=$(jq -r '.MinimumApplicationVersion | "\(.Major).\(.Minor).\(.Patch).\(.Build)"' "$SRC")
+          BRANCH="AstralWardenBeacon/$VERSION"
+          DEST="manifests/a/${{ env.PLUGIN_NAME }}/$MIN_APP/$VERSION"
+
+          git clone "https://x-access-token:${PAT}@github.com/${{ github.repository_owner }}/nina.plugin.manifests.git" manifests-repo
+          cd manifests-repo
+          git remote add upstream https://github.com/isbeorn/nina.plugin.manifests.git
+          git fetch upstream main
+          git checkout -b "$BRANCH" upstream/main
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          mkdir -p "$DEST"
+          cp "$SRC" "$DEST/manifest.json"
+          git add "$DEST/manifest.json"
+          git commit -m "Add manifest for ${{ env.PLUGIN_NAME }} $VERSION"
+
+          # The same check upstream CI runs: schema validation, then download the installer and
+          # compare its hash.
+          npm install --no-audit --no-fund
+          node validate-latest-manifest.js
+
+          git push origin "$BRANCH"
+          {
+            echo "### Manifest staged"
+            echo "Branch \`$BRANCH\` on ${{ github.repository_owner }}/nina.plugin.manifests, at \`$DEST/manifest.json\`."
+            echo "Open the pull request: https://github.com/isbeorn/nina.plugin.manifests/compare/main...${{ github.repository_owner }}:nina.plugin.manifests:$BRANCH?expand=1"
+          } >> "$GITHUB_STEP_SUMMARY"

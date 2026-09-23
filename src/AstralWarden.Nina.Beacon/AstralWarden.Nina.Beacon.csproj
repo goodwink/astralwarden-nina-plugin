@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+
+    <!--
+      Version comes from $(BeaconVersion) in Directory.Build.props — one place, never hand-edited in
+      AssemblyInfo.cs (where it silently drifted to 0.1.0.0 and stayed there).
+
+      AssemblyInfo.cs still owns the NINA plugin-manifest attributes: they include a multi-line
+      LongDescription, which XML attribute values would flatten. So rather than turning assembly-info
+      generation off wholesale, generation stays ON for the version attributes only and every
+      attribute AssemblyInfo.cs declares is switched off individually — declaring one in both places
+      is a duplicate-attribute compile error, which is the failure mode that keeps these honest.
+    -->
+    <Version>$(BeaconVersion)</Version>
+    <GenerateAssemblyTitleAttribute>false</GenerateAssemblyTitleAttribute>
+    <GenerateAssemblyDescriptionAttribute>false</GenerateAssemblyDescriptionAttribute>
+    <GenerateAssemblyCompanyAttribute>false</GenerateAssemblyCompanyAttribute>
+    <GenerateAssemblyProductAttribute>false</GenerateAssemblyProductAttribute>
+    <GenerateAssemblyCopyrightAttribute>false</GenerateAssemblyCopyrightAttribute>
+    <GenerateAssemblyConfigurationAttribute>false</GenerateAssemblyConfigurationAttribute>
+    <GenerateNeutralResourcesLanguageAttribute>false</GenerateNeutralResourcesLanguageAttribute>
+    <!-- NINA hosts the runtime; only this assembly (+pdb) is installed into the plugin folder. -->
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- BeaconClientConnection is internal on purpose (nothing outside the server owns one), and its
+         teardown is exactly what needs testing. -->
+    <InternalsVisibleTo Include="AstralWarden.Nina.Beacon.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Aggregate package for the NINA public assemblies. Pinned to the 3.x stable the Advanced API
+         plugin also builds against; .NET binds equal-or-higher, so it loads on 3.3 nightlies. -->
+    <PackageReference Include="NINA.Plugin" Version="3.2.0.9001" />
+  </ItemGroup>
+
+</Project>
