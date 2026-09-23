@@ -31,7 +31,7 @@ public sealed class CameraWatcher : DeviceWatcherBase<CameraInfo>, ICameraConsum
     {
         _mediator = mediator;
         _focalLengthMm = focalLengthMm ?? (() => null);
-        _mediator.RegisterConsumer(this);
+        Attach(() => _mediator.RegisterConsumer(this));
     }
     public void UpdateDeviceInfo(CameraInfo deviceInfo) => Update(deviceInfo);
     protected override object? Map(CameraInfo info) => DeviceInfoMapper.Camera(info, _focalLengthMm());
@@ -44,7 +44,7 @@ public sealed class FocuserWatcher : DeviceWatcherBase<FocuserInfo>, IFocuserCon
     public FocuserWatcher(IFocuserMediator mediator, BeaconServer server) : base(server, "focuser")
     {
         _mediator = mediator;
-        _mediator.RegisterConsumer(this);
+        Attach(() => _mediator.RegisterConsumer(this));
     }
     public void UpdateDeviceInfo(FocuserInfo deviceInfo) => Update(deviceInfo);
     protected override object? Map(FocuserInfo info) => DeviceInfoMapper.Focuser(info);
@@ -64,7 +64,7 @@ public sealed class RotatorWatcher : DeviceWatcherBase<RotatorInfo>, IRotatorCon
     public RotatorWatcher(IRotatorMediator mediator, BeaconServer server) : base(server, "rotator")
     {
         _mediator = mediator;
-        _mediator.RegisterConsumer(this);
+        Attach(() => _mediator.RegisterConsumer(this));
     }
     public void UpdateDeviceInfo(RotatorInfo deviceInfo) => Update(deviceInfo);
     protected override object? Map(RotatorInfo info) => DeviceInfoMapper.Rotator(info);
@@ -77,7 +77,7 @@ public sealed class SafetyWatcher : DeviceWatcherBase<SafetyMonitorInfo>, ISafet
     public SafetyWatcher(ISafetyMonitorMediator mediator, BeaconServer server) : base(server, "safety")
     {
         _mediator = mediator;
-        _mediator.RegisterConsumer(this);
+        Attach(() => _mediator.RegisterConsumer(this));
     }
     public void UpdateDeviceInfo(SafetyMonitorInfo deviceInfo) => Update(deviceInfo);
     protected override object? Map(SafetyMonitorInfo info) => DeviceInfoMapper.Safety(info);
@@ -90,7 +90,7 @@ public sealed class FlatWatcher : DeviceWatcherBase<FlatDeviceInfo>, IFlatDevice
     public FlatWatcher(IFlatDeviceMediator mediator, BeaconServer server) : base(server, "flat")
     {
         _mediator = mediator;
-        _mediator.RegisterConsumer(this);
+        Attach(() => _mediator.RegisterConsumer(this));
     }
     public void UpdateDeviceInfo(FlatDeviceInfo deviceInfo) => Update(deviceInfo);
     protected override object? Map(FlatDeviceInfo info) => DeviceInfoMapper.Flat(info);
@@ -103,7 +103,7 @@ public sealed class SwitchWatcher : DeviceWatcherBase<SwitchInfo>, ISwitchConsum
     public SwitchWatcher(ISwitchMediator mediator, BeaconServer server) : base(server, "switch")
     {
         _mediator = mediator;
-        _mediator.RegisterConsumer(this);
+        Attach(() => _mediator.RegisterConsumer(this));
     }
     public void UpdateDeviceInfo(SwitchInfo deviceInfo) => Update(deviceInfo);
     protected override object? Map(SwitchInfo info) => DeviceInfoMapper.Switches(info);
@@ -116,7 +116,7 @@ public sealed class WeatherWatcher : DeviceWatcherBase<WeatherDataInfo>, IWeathe
     public WeatherWatcher(IWeatherDataMediator mediator, BeaconServer server) : base(server, "weather")
     {
         _mediator = mediator;
-        _mediator.RegisterConsumer(this);
+        Attach(() => _mediator.RegisterConsumer(this));
     }
     public void UpdateDeviceInfo(WeatherDataInfo deviceInfo) => Update(deviceInfo);
     protected override object? Map(WeatherDataInfo info) => DeviceInfoMapper.Weather(info);
@@ -129,7 +129,7 @@ public sealed class MountWatcher : DeviceWatcherBase<TelescopeInfo>, ITelescopeC
     public MountWatcher(ITelescopeMediator mediator, BeaconServer server) : base(server, "mount")
     {
         _mediator = mediator;
-        _mediator.RegisterConsumer(this);
+        Attach(() => _mediator.RegisterConsumer(this));
     }
     public void UpdateDeviceInfo(TelescopeInfo deviceInfo) => Update(deviceInfo);
     protected override object? Map(TelescopeInfo info) => DeviceInfoMapper.Mount(info);
@@ -142,7 +142,7 @@ public sealed class FilterWheelWatcher : DeviceWatcherBase<FilterWheelInfo>, IFi
     public FilterWheelWatcher(IFilterWheelMediator mediator, BeaconServer server) : base(server, "filterwheel")
     {
         _mediator = mediator;
-        _mediator.RegisterConsumer(this);
+        Attach(() => _mediator.RegisterConsumer(this));
     }
     public void UpdateDeviceInfo(FilterWheelInfo deviceInfo) => Update(deviceInfo);
     protected override object? Map(FilterWheelInfo info) => DeviceInfoMapper.FilterWheel(info);
@@ -155,7 +155,7 @@ public sealed class GuiderWatcher : DeviceWatcherBase<GuiderInfo>, IGuiderConsum
     public GuiderWatcher(IGuiderMediator mediator, BeaconServer server) : base(server, "guider")
     {
         _mediator = mediator;
-        _mediator.RegisterConsumer(this);
+        Attach(() => _mediator.RegisterConsumer(this));
     }
     public void UpdateDeviceInfo(GuiderInfo deviceInfo) => Update(deviceInfo);
     protected override object? Map(GuiderInfo info) => DeviceInfoMapper.Guider(info);

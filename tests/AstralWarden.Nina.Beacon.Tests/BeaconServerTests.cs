@@ -138,6 +138,122 @@ public class BeaconServerTests
         Assert.True(span > seqs.Count, "expected a seq gap where messages were dropped");
     }
 
+    private sealed class CountingPayload
+    {
+        public int Reads;
+        public int Value { get { Interlocked.Increment(ref Reads); return 1; } }
+    }
+
+    [Fact]
+    public void Broadcast_with_no_one_connected_does_not_serialize()
+    {
+        // Broadcast is called from NINA's event threads for every device push and heartbeat, so
+        // with no reader there is nothing to pay for.
+        using var server = StartServer();
+        var payload = new CountingPayload();
+
+        server.Broadcast("heartbeat", payload);
+
+        Assert.Equal(0, payload.Reads);
+    }
+
+    [Fact]
+    public async Task Shutdown_waits_for_stalled_clients_together_not_one_after_another()
+    {
+        // NINA runs plugin teardown synchronously on exit, so the time the Beacon spends draining is
+        // time NINA spends not closing. Each client gets a short grace period to take its "bye";
+        // a client that isn't reading uses all of it. Granting those periods one client at a time
+        // would make exit time grow with the number of stuck readers.
+        var server = new BeaconServer(port: 0, queueCapacity: 8, maxClients: 3);
+        server.Start();
+        var stalled = new List<TcpClient>();
+        for (var i = 0; i < 3; i++)
+        {
+            var tcp = new TcpClient();
+            await tcp.ConnectAsync("127.0.0.1", server.Port);
+            stalled.Add(tcp);
+        }
+        await WaitForClientsAsync(server, 3);
+
+        // Fill every client's socket buffers so each pump is blocked mid-write and can only
+        // finish by timing out. How much the OS buffers absorb first varies, so send until the
+        // bounded queues are observably overflowing.
+        var pad = new string('x', 4000);
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (server.DroppedTotal < 3 * 1_000 && DateTime.UtcNow < deadline)
+        {
+            for (var i = 0; i < 1_000; i++) server.Broadcast("heartbeat", new { i, pad });
+            await Task.Delay(10);
+        }
+        Assert.True(server.DroppedTotal > 0, "the stalled clients never caused a drop");
+
+        var stopwatch = Stopwatch.StartNew();
+        await server.ShutdownAsync("shutdown");
+        stopwatch.Stop();
+
+        // One 2 s grace period, plus slack; three granted in turn would be at least 6 s.
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(4), $"shutdown took {stopwatch.Elapsed}");
+        foreach (var tcp in stalled) tcp.Close();
+    }
+
+    [Fact]
+    public async Task A_connection_past_the_client_limit_is_closed_and_the_others_keep_their_place()
+    {
+        // Each client costs memory inside NINA's process (its queue), so the number of readers is
+        // capped. The agent needs one; the second slot is for a diagnostic tail. Anything past
+        // that is refused at once, before it is sent anything, and never displaces a reader.
+        using var server = StartServer();
+        using var a = await ConnectAsync(server);
+        using var b = await ConnectAsync(server);
+        await WaitForClientsAsync(server, 2);
+
+        var third = new TcpClient();
+        await third.ConnectAsync("127.0.0.1", server.Port);
+        var buffer = new byte[1];
+        var read = await third.GetStream().ReadAsync(buffer).AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(0, read); // closed by the server, with not even a hello
+        Assert.Equal(2, server.ClientCount);
+
+        server.Broadcast("heartbeat", new HeartbeatPayload(1.0, 2, 0));
+        foreach (var reader in new[] { a, b })
+        {
+            var envelope = await ReadEnvelopeAsync(reader);
+            Assert.Equal("heartbeat", envelope.GetProperty("type").GetString());
+        }
+        third.Close();
+    }
+
+    [Fact]
+    public async Task A_stalled_client_is_held_to_a_byte_budget_not_just_a_message_count()
+    {
+        // Messages vary from a few hundred bytes (a heartbeat) to a few hundred KB (a frame's
+        // thumbnail or star list), so a count limit alone doesn't bound the memory a stalled
+        // reader holds inside NINA. The count here is set too high ever to bite, so any drop
+        // is the byte budget working.
+        const long budget = 256 * 1024;
+        using var server = new BeaconServer(port: 0, queueCapacity: 1_000_000, maxQueueBytes: budget);
+        server.Start();
+        var stalled = new TcpClient();
+        await stalled.ConnectAsync("127.0.0.1", server.Port);
+        await WaitForClientsAsync(server, 1);
+
+        var pad = new string('x', 4000);
+        var sent = 0;
+        var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+        while (server.DroppedTotal == 0 && DateTime.UtcNow < deadline)
+        {
+            for (var i = 0; i < 1_000; i++, sent++) server.Broadcast("heartbeat", new { i, pad });
+            Assert.True(server.QueuedBytes <= budget, $"queued {server.QueuedBytes} bytes, budget {budget}");
+            await Task.Delay(10);
+        }
+
+        Assert.True(server.DroppedTotal > 0, "the byte budget never dropped anything");
+        Assert.True(sent < 1_000_000, "drops came from the count limit, not the byte budget");
+        Assert.True(server.QueuedBytes <= budget, $"queued {server.QueuedBytes} bytes, budget {budget}");
+        stalled.Close();
+    }
+
     [Fact]
     public async Task Shutdown_sends_bye_then_closes()
     {

@@ -14,6 +14,15 @@ in sync with it (`src/AstralWarden.Nina.Beacon/Contracts/Messages.cs` and
   responses, acknowledgements, subscriptions, or client heartbeats.
 - **No RPC shapes.** No `method`/`params`/`id` fields, no request/response correlation of any kind.
 
+## Connections
+
+- **At most two clients at once.** Each client's queue lives in NINA's memory. The agent needs one
+  connection; the second is room for a diagnostic tail. A third connection is closed immediately,
+  before it is sent anything (not even `hello`), and never displaces a connected client.
+- **One NINA instance per PC.** The first NINA instance to load the Beacon runs it for as long as
+  that instance runs. A later instance logs a warning, shows a NINA notification and stays off for
+  its whole session, so it can never take over the port and feed a reader another rig's data.
+
 ## Envelope
 
 Every line is one JSON object:
@@ -25,9 +34,10 @@ Every line is one JSON object:
 - `v` — protocol version. Bumped only on breaking changes.
 - `type` — dotted lowercase message type (see catalog below).
 - `seq` — **per-connection** monotonic counter, stamped when a message is queued for that client.
-  The server drops messages rather than block NINA (bounded queue per client, drop-oldest), so a
-  gap in the seq stream is exactly the set of messages that client lost; `heartbeat` reports the
-  server-wide drop count.
+  The server drops messages rather than block NINA, so a gap in the seq stream is exactly the set
+  of messages that client lost; `heartbeat` reports the server-wide drop count. Each client's queue
+  is bounded both by count (2000 messages) and by memory (8 MB), dropping oldest first: messages
+  range from a few hundred bytes to a few hundred KB, so a count alone wouldn't bound memory.
 - `ts` — UTC ISO-8601 with milliseconds, stamped when the message was created.
 - `payload` — type-specific body, camelCase. Consumers must tolerate unknown types and unknown
   fields (the stream iterates faster than the readers).
@@ -162,8 +172,9 @@ Events: `slewed` (with from/to), `parked`, `unparked`, `homed`, `flip-before`, `
 ```
 The Beacon ships a sequencer instruction (category "Astral Warden") with title / severity
 (info|warn|error) / message fields; the agent forwards it as a standard event
-(`nina.custom_alert`) into the alerting pipeline. Validation warns in the sequencer UI when the
-Beacon isn't running or no agent is connected.
+(`nina.custom_alert`) into the alerting pipeline. Validation fails only when the Beacon itself
+failed to start. NINA turns any validation issue into a "start anyway?" prompt when a sequence
+starts, so an agent that isn't connected at that moment is not treated as one.
 
 ### `ts.waitstart` / `ts.targetstart` / `ts.targetcomplete` / `ts.containerstopped`
 In-process Target Scheduler feed via NINA's official IMessageBroker — no HTTP API, no SQLite
@@ -183,16 +194,6 @@ silent when TS isn't installed. Last `ts.targetstart` re-broadcasts to late join
   proposal candidates for tcpalmer: an exposure-plan-progress topic on target start, and a
   per-image-graded topic.
 
-### `appm.model` — when APPM is reachable (model-building sessions), cached + re-sent to late joiners
-```json
-{"runStatus":"Complete","pointCount":120,"raRms":3.1,"decRms":2.8,"totalRms":4.18,
- "points":[{"ha":-2.5,"dec":40.0,"raDelta":3.0,"decDelta":-1.2,"side":"East","status":"Solved"}]}
-```
-APPM only runs while building a model; the Beacon polls slowly (5 min, GET-only), caches the last
-model seen this session, and re-emits it on client connect. The live APCC model is not readable:
-APCC's only known API is a non-public raw serial-command passthrough, which can command the mount,
-so the read-only rule excludes it.
-
 ## Deferred / v2 candidates
 
 - `image.savefailed` — needs NINA 3.3's `ImageSaveFailed` mediator event (package bump).
@@ -202,3 +203,7 @@ so the read-only rule excludes it.
 - HocusFocus tilt/aberration model per AF run — only via HF assembly reference or its per-region
   report files; revisit if grid-based tilt from `image.stars` proves insufficient.
 - TS progress stats via broker — upstream proposal to tcpalmer (see ts section).
+- `appm.model` (Astro-Physics APPM pointing-model points) — removed after 1.3.2.1 because nothing
+  consumed it. If restored, poll APPM's local API only while an Astro-Physics mount is connected.
+  The live APCC model stays out of reach either way: APCC's only known API is a raw serial-command
+  passthrough that can command the mount.

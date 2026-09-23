@@ -11,13 +11,11 @@ namespace AstralWarden.Nina.Beacon.Tests;
 public class BeaconRuntimeCollection { }
 
 /// <summary>
-/// The user's own sequencer instruction. This one ships INSIDE NINA, in the user's sequence, so its
-/// validation result is not ours to get wrong in either direction (ch.4: "the sequencer UI warns at
-/// validation time when the Beacon isn't running or no agent is connected"):
-///
-///  • always-invalid marks a perfectly good sequence as broken inside capture software we did not
-///    sell the user — our monitoring plugin degrading their imaging night;
-///  • always-valid removes the only warning that the alert they just added would go nowhere.
+/// The user's own sequencer instruction. This one ships INSIDE NINA, in the user's sequence, and
+/// NINA turns ANY validation issue into a modal "start anyway?" prompt, defaulting to Cancel, when
+/// the sequence starts. So an issue is only raised when the plugin itself is broken (the Beacon
+/// failed to start). An agent that simply isn't connected right now (restarting, updating, not
+/// installed yet) is a passing state, and must never stand between the user and their night.
 ///
 /// And validation runs on the sequencer's UI path, so it must never throw at NINA.
 /// </summary>
@@ -31,14 +29,12 @@ public class SendWardenAlertInstructionTests : IDisposable
     private static void Clear()
     {
         BeaconRuntime.Broadcast = null;
-        BeaconRuntime.ClientCount = null;
     }
 
     [Fact]
-    public void With_the_beacon_running_and_an_agent_connected_it_validates_clean()
+    public void With_the_beacon_running_it_validates_clean()
     {
         BeaconRuntime.Broadcast = (_, _) => { };
-        BeaconRuntime.ClientCount = () => 1;
 
         var instruction = new SendWardenAlertInstruction();
 
@@ -56,22 +52,13 @@ public class SendWardenAlertInstructionTests : IDisposable
     }
 
     [Fact]
-    public void With_no_agent_connected_it_says_the_alert_would_go_nowhere()
+    public void With_no_agent_connected_it_still_validates_so_the_sequence_can_start()
     {
-        BeaconRuntime.Broadcast = (_, _) => { };
-        BeaconRuntime.ClientCount = () => 0;
-
-        var instruction = new SendWardenAlertInstruction();
-
-        Assert.False(instruction.Validate());
-        Assert.Contains(instruction.Issues, i => i.Contains("agent is not connected"));
-    }
-
-    [Fact]
-    public void A_throwing_client_count_reports_clean_rather_than_faulting_the_sequencer_ui()
-    {
-        BeaconRuntime.Broadcast = (_, _) => { };
-        BeaconRuntime.ClientCount = () => throw new InvalidOperationException("mid-teardown");
+        // The Beacon is up but nobody is listening: validation must not ask whether anyone is.
+        // A failed check here would put NINA's "start anyway?" modal in front of the user's night.
+        using var server = new AstralWarden.Nina.Beacon.Server.BeaconServer(port: 0);
+        BeaconRuntime.Broadcast = server.Broadcast;
+        Assert.Equal(0, server.ClientCount);
 
         var instruction = new SendWardenAlertInstruction();
 
@@ -149,6 +136,36 @@ public class SendWardenAlertInstructionTests : IDisposable
         var instruction = new SendWardenAlertInstruction();
 
         Assert.Null(await Record.ExceptionAsync(() => instruction.Execute(null!, CancellationToken.None)));
+    }
+
+    [Fact]
+    public void A_copy_keeps_every_setting_the_user_can_make()
+    {
+        // NINA clones an instruction whenever the user duplicates it, drags it from a template, or
+        // loads a template into a sequence. NINA's own instructions copy the shared metadata,
+        // including the on-error behaviour and attempt count the user sets in the sequencer, so a
+        // copy that dropped them would quietly change how the user's sequence handles a failure.
+        var original = new SendWardenAlertInstruction
+        {
+            Title = "Roof check",
+            Severity = "error",
+            Message = "cover did not open",
+            Attempts = 3,
+            ErrorBehavior = NINA.Sequencer.Utility.InstructionErrorBehavior.SkipInstructionSetOnError,
+        };
+
+        var copy = Assert.IsType<SendWardenAlertInstruction>(original.Clone());
+
+        Assert.NotSame(original, copy);
+        Assert.Equal("Roof check", copy.Title);
+        Assert.Equal("error", copy.Severity);
+        Assert.Equal("cover did not open", copy.Message);
+        Assert.Equal(3, copy.Attempts);
+        Assert.Equal(NINA.Sequencer.Utility.InstructionErrorBehavior.SkipInstructionSetOnError, copy.ErrorBehavior);
+        Assert.Equal(original.Name, copy.Name);
+        Assert.Equal(original.Category, copy.Category);
+        Assert.Equal(original.Description, copy.Description);
+        Assert.Same(original.Icon, copy.Icon);
     }
 
     [Fact]

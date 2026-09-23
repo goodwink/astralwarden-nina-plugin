@@ -226,19 +226,3 @@ public sealed record TsTargetCompletePayload(
     string? Project, string? Target, double? Ra, double? Dec, double? Rotation);
 
 public sealed record TsContainerStoppedPayload(string? StoppedAt);
-
-// ---- APPM tracking model (phase 9) ----
-// APPM only runs while building a model; the Beacon polls opportunistically, caches the last-seen
-// model, and re-emits it to late joiners. APCC's :60001 API is non-public and write-shaped
-// (sendcmd passthrough) — excluded by the read-only rule.
-
-public sealed record AppmPoint(
-    double? Ha, double? Dec, double? RaDelta, double? DecDelta, string? Side, string? Status);
-
-public sealed record AppmModelPayload(
-    string? RunStatus,
-    int PointCount,
-    double? RaRms,
-    double? DecRms,
-    double? TotalRms,
-    IReadOnlyList<AppmPoint> Points);

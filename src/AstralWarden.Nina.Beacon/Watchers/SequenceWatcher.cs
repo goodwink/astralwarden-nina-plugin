@@ -114,7 +114,6 @@ public sealed class SequenceWatcher : IDisposable
     {
         _events.Dispose();
         _server.ClientConnected -= OnClientConnected;
-        _cts.Cancel();
-        _cts.Dispose();
+        PeriodicLoop.Stop(_cts, _loop);
     }
 }

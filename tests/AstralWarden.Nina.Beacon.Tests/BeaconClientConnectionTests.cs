@@ -44,7 +44,7 @@ public class BeaconClientConnectionTests : IDisposable
         var client = new TcpClient();
         await client.ConnectAsync(IPAddress.Loopback, ((IPEndPoint)_listener.LocalEndpoint).Port);
         var accepted = await _listener.AcceptTcpClientAsync();
-        var connection = new BeaconClientConnection(accepted, capacity, CancellationToken.None);
+        var connection = new BeaconClientConnection(accepted, capacity, BeaconServer.DefaultMaxQueueBytes, CancellationToken.None);
         _open.Add(connection);
         _open.Add(client);
         return (connection, new StreamReader(client.GetStream()));

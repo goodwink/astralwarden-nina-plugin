@@ -21,9 +21,14 @@ namespace AstralWarden.Nina.Beacon;
 [Export(typeof(IPluginManifest))]
 public class Beacon : PluginBase
 {
+    /// <summary>The single-instance claim's name; tests substitute their own.</summary>
+    internal static string InstanceName = SingleInstanceGuard.BeaconName;
+
     private readonly IProfileService _profileService;
-    private readonly BeaconServer _server;
-    private readonly HeartbeatWatcher _heartbeat;
+    private readonly SingleInstanceGuard? _instance;
+    // Null when another NINA instance on this PC already runs the Beacon: this one stays off.
+    private readonly BeaconServer? _server;
+    private readonly HeartbeatWatcher? _heartbeat;
     private readonly List<IDisposable> _watchers = new();
     private readonly string _startedAt = BeaconJson.Timestamp(DateTimeOffset.UtcNow);
 
@@ -45,6 +50,21 @@ public class Beacon : PluginBase
         IMessageBroker messageBroker)
     {
         _profileService = profileService;
+
+        // First NINA instance on this PC wins, for as long as it runs; see SingleInstanceGuard.
+        _instance = SingleInstanceGuard.TryClaim(InstanceName);
+        if (_instance is null)
+        {
+            const string message = "Astral Warden Beacon is already running in another NINA instance on " +
+                "this PC. Only that instance is monitored; this one is not.";
+            Logger.Warning($"Beacon: {message}");
+            try { NINA.Core.Utility.Notification.Notification.ShowWarning(message); }
+            catch (Exception ex) { Logger.Warning($"Beacon: could not show notification: {ex.Message}"); }
+            // Off by design, not broken: the alert instruction validates and does nothing, rather
+            // than failing validation and blocking this instance's sequences from starting.
+            BeaconRuntime.Broadcast = static (_, _) => { };
+            return;
+        }
 
         Action<string> log = message => Logger.Info($"Beacon: {message}");
         _server = new BeaconServer(helloFactory: BuildHello, log: log);
@@ -76,11 +96,9 @@ public class Beacon : PluginBase
         if (sequenceWatcher is not null) _watchers.Add(sequenceWatcher);
         Add("mount-events", () => new MountEventWatcher(telescopeMediator, _server, log));
         Add("target-scheduler", () => new TargetSchedulerWatcher(messageBroker, _server));
-        Add("appm", () => new Optional.AppmPoller(_server, log: log));
 
         // Sequence instructions are MEF-instantiated by NINA, so they reach the server statically.
         BeaconRuntime.Broadcast = _server.Broadcast;
-        BeaconRuntime.ClientCount = () => _server.ClientCount;
 
         // Never throws — a busy port leaves the plugin loaded and retrying, not dead at composition.
         _server.Start();
@@ -136,14 +154,18 @@ public class Beacon : PluginBase
     public override async Task Teardown()
     {
         BeaconRuntime.Broadcast = null;
-        BeaconRuntime.ClientCount = null;
-        // Teardown runs while NINA is shutting down, so mediators may already be gone: one watcher
-        // throwing on Dispose must not strand the rest still registered.
-        Quietly(_heartbeat.Dispose);
-        foreach (var watcher in _watchers) Quietly(watcher.Dispose);
-        try { await _server.ShutdownAsync("shutdown"); }
-        catch (Exception ex) { Logger.Error($"Beacon: server shutdown failed: {ex}"); }
-        Logger.Info("Astral Warden Beacon stopped");
+        if (_server is not null)
+        {
+            // Teardown runs while NINA is shutting down, so mediators may already be gone: one
+            // watcher throwing on Dispose must not strand the rest still registered.
+            if (_heartbeat is not null) Quietly(_heartbeat.Dispose);
+            foreach (var watcher in _watchers) Quietly(watcher.Dispose);
+            try { await _server.ShutdownAsync("shutdown"); }
+            catch (Exception ex) { Logger.Error($"Beacon: server shutdown failed: {ex}"); }
+            Logger.Info("Astral Warden Beacon stopped");
+        }
+        // Released last: the next NINA to start may claim the socket once this one is fully down.
+        _instance?.Dispose();
         await base.Teardown();
     }
 

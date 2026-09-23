@@ -113,6 +113,30 @@ public class WatcherWiringTests
         server.Dispose();
     }
 
+    private static int ClientConnectedHandlers(BeaconServer server)
+    {
+        // The event's subscriber list is the only place a leaked handler shows up.
+        var field = typeof(BeaconServer).GetField("ClientConnected",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+        return (field.GetValue(server) as Delegate)?.GetInvocationList().Length ?? 0;
+    }
+
+    [Fact]
+    public void A_device_watcher_that_fails_to_register_leaves_nothing_behind()
+    {
+        // The plugin drops a watcher whose constructor throws, so nothing will ever dispose it.
+        // Anything it attached to the server before failing would stay attached for the session.
+        var server = new BeaconServer(port: 0);
+        var mediator = Substitute.For<ICameraMediator>();
+        mediator.When(m => m.RegisterConsumer(Arg.Any<ICameraConsumer>()))
+            .Do(_ => throw new NullReferenceException("mediator not ready"));
+
+        Assert.Throws<NullReferenceException>(() => new CameraWatcher(mediator, server));
+
+        Assert.Equal(0, ClientConnectedHandlers(server));
+        server.Dispose();
+    }
+
     // ---- MountEventWatcher ------------------------------------------------------------------
 
     [Fact]

@@ -27,6 +27,14 @@ public abstract class DeviceWatcherBase<TInfo> : IDeviceSummary, IDisposable whe
     {
         _server = server;
         Device = device;
+    }
+
+    /// <summary>Register with the device's mediator, then join the server's late-joiner replay.
+    /// In that order: the plugin drops a watcher whose constructor throws without disposing it, so
+    /// nothing may be attached to the server until registration has succeeded.</summary>
+    protected void Attach(Action registerWithMediator)
+    {
+        registerWithMediator();
         _server.ClientConnected += OnClientConnected;
     }
 

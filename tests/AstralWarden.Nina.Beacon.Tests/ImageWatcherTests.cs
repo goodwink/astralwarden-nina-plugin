@@ -96,6 +96,62 @@ public class ImageWatcherTests
         server.Dispose();
     }
 
+    private sealed class CountingAnalysis : IStarDetectionAnalysis
+    {
+        private readonly List<DetectedStar> _stars;
+        public CountingAnalysis(List<DetectedStar> stars) => _stars = stars;
+        public int StarListReads;
+        public double HFR { get; set; }
+        public double HFRStDev { get; set; }
+        public int DetectedStars { get; set; }
+        public List<DetectedStar> StarList
+        {
+            get { Interlocked.Increment(ref StarListReads); return _stars; }
+            set { }
+        }
+#pragma warning disable CS0067 // required by the interface; nothing here raises it
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+#pragma warning restore CS0067
+    }
+
+    [Fact]
+    public async Task With_no_one_connected_a_saved_frame_costs_nina_nothing()
+    {
+        // The handler runs on NINA's image-save thread. Its work (thumbnail encode, star mapping,
+        // serialization) exists only to be sent; with no reader connected (the agent not installed
+        // yet, or restarting) it would be spent on every frame for nothing.
+        var server = new BeaconServer(port: 0);
+        server.Start();
+        var save = Substitute.For<IImageSaveMediator>();
+        var camera = Substitute.For<ICameraMediator>();
+        using var watcher = new ImageWatcher(save, camera, server);
+        await WaitForSubscriptionAsync(save);
+
+        var stars = new List<DetectedStar>
+        {
+            new() { Position = new Accord.Point(100, 200), HFR = 2.4, MaxBrightness = 20000 },
+        };
+        var analysis = new CountingAnalysis(stars) { DetectedStars = 1 };
+        var frame = Frame("LIGHT", null);
+        frame.StarDetectionAnalysis = analysis;
+
+        save.ImageSaved += Raise.Event<EventHandler<ImageSavedEventArgs>>(this, frame);
+        await Task.Delay(Settle);
+
+        Assert.Equal(0, Volatile.Read(ref analysis.StarListReads));
+        Assert.DoesNotContain(camera.ReceivedCalls(), c => c.GetMethodInfo().Name == "GetInfo");
+
+        // ...and it is a gate, not a switch: once a reader connects, frames flow again.
+        var reader = new WireReader();
+        await reader.ConnectAsync(server);
+        save.ImageSaved += Raise.Event<EventHandler<ImageSavedEventArgs>>(this, frame);
+        await Task.Delay(Settle);
+        Assert.Contains("image.saved", reader.Types);
+
+        reader.Dispose();
+        server.Dispose();
+    }
+
     [Fact]
     public async Task A_camera_driver_that_throws_costs_the_sensor_dimensions_not_the_star_message()
     {

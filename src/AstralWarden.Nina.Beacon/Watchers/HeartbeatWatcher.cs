@@ -52,9 +52,5 @@ public sealed class HeartbeatWatcher : IDisposable
         catch { return null; }
     }
 
-    public void Dispose()
-    {
-        _cts.Cancel();
-        _cts.Dispose();
-    }
+    public void Dispose() => PeriodicLoop.Stop(_cts, _loop);
 }

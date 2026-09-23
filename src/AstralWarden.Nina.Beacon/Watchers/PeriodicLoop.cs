@@ -1,7 +1,7 @@
 namespace AstralWarden.Nina.Beacon.Watchers;
 
 /// <summary>
-/// The one driver behind every background poll loop in the Beacon (heartbeat, sequence poll, APPM).
+/// The one driver behind every background poll loop in the Beacon (heartbeat, sequence poll).
 /// A loop that dies to an unanticipated exception is a feed that goes quiet with nobody noticing —
 /// on a rig the user can't walk over to. So: each tick is individually guarded, so one bad tick
 /// never ends the loop; a fault is logged exactly once per loop (a fault that repeats every tick
@@ -10,9 +10,8 @@ namespace AstralWarden.Nina.Beacon.Watchers;
 public static class PeriodicLoop
 {
     /// <param name="name">Loop name, used in the one-shot fault log.</param>
-    /// <param name="tickImmediately">Run one tick before the first interval elapses.</param>
     public static async Task RunAsync(string name, TimeSpan interval, Func<CancellationToken, Task> tick,
-        Action<string>? log, CancellationToken ct, bool tickImmediately = false)
+        Action<string>? log, CancellationToken ct)
     {
         var reported = false;
 
@@ -39,7 +38,6 @@ public static class PeriodicLoop
         try
         {
             using var timer = new PeriodicTimer(interval);
-            if (tickImmediately) await GuardedTickAsync().ConfigureAwait(false);
             while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
                 await GuardedTickAsync().ConfigureAwait(false);
         }
@@ -50,8 +48,25 @@ public static class PeriodicLoop
         }
     }
 
+    /// <summary>How long teardown waits for a tick already in progress to finish.</summary>
+    public static readonly TimeSpan StopTimeout = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// Cancel a loop and wait (bounded) for any tick in progress to finish before returning. Teardown
+    /// calls this: a tick that outlives it is our code still reading NINA's state, or still making a
+    /// request, after the plugin has said it stopped. The wait is bounded so a tick stuck in someone
+    /// else's code can delay NINA's exit by at most <see cref="StopTimeout"/>, never hang it. Ticks
+    /// run on the thread pool with no captured context, so blocking here cannot deadlock them.
+    /// </summary>
+    public static void Stop(CancellationTokenSource cts, Task loop)
+    {
+        try { cts.Cancel(); } catch (ObjectDisposedException) { return; }
+        try { loop.Wait(StopTimeout); } catch { /* the loop's own faults are already logged */ }
+        cts.Dispose();
+    }
+
     /// <summary>Synchronous-tick overload for the loops that only touch in-memory state.</summary>
     public static Task RunAsync(string name, TimeSpan interval, Action tick,
-        Action<string>? log, CancellationToken ct, bool tickImmediately = false) =>
-        RunAsync(name, interval, _ => { tick(); return Task.CompletedTask; }, log, ct, tickImmediately);
+        Action<string>? log, CancellationToken ct) =>
+        RunAsync(name, interval, _ => { tick(); return Task.CompletedTask; }, log, ct);
 }

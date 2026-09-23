@@ -21,6 +21,9 @@ public sealed class BeaconServer : IDisposable
 
     private readonly int _configuredPort;
     private readonly int _queueCapacity;
+    private readonly int _maxClients;
+    private readonly long _maxQueueBytes;
+    private bool _refusalLogged;
     private readonly Func<object>? _helloFactory;
     private readonly Action<string>? _log;
     private readonly TimeSpan _rebindInterval;
@@ -35,12 +38,22 @@ public sealed class BeaconServer : IDisposable
     private Task? _runner;
     private volatile bool _listening;
 
+    /// <summary>Readers allowed at once. Each holds a queue in NINA's memory; the agent needs one,
+    /// and the second is room for a diagnostic tail.</summary>
+    public const int DefaultMaxClients = 2;
+
+    /// <summary>Memory one reader's backlog may hold before its oldest messages are dropped.</summary>
+    public const long DefaultMaxQueueBytes = 8 * 1024 * 1024;
+
     public BeaconServer(int port = BeaconProtocol.DefaultPort, int queueCapacity = 2000,
         Func<object>? helloFactory = null, Action<string>? log = null, TimeSpan? rebindInterval = null,
-        TimeSpan? minAcceptBackoff = null)
+        TimeSpan? minAcceptBackoff = null, int maxClients = DefaultMaxClients,
+        long maxQueueBytes = DefaultMaxQueueBytes)
     {
         _configuredPort = port;
         _queueCapacity = queueCapacity;
+        _maxClients = maxClients;
+        _maxQueueBytes = maxQueueBytes;
         _helloFactory = helloFactory;
         _log = log;
         _rebindInterval = rebindInterval ?? RebindInterval;
@@ -149,10 +162,11 @@ public sealed class BeaconServer : IDisposable
     {
         try
         {
-            var json = BeaconJson.Serialize(payload);
-            var ts = BeaconJson.Timestamp(DateTimeOffset.UtcNow);
             BeaconClientConnection[] clients;
             lock (_gate) clients = _clients.ToArray();
+            if (clients.Length == 0) return; // nobody to serialize for
+            var json = BeaconJson.Serialize(payload);
+            var ts = BeaconJson.Timestamp(DateTimeOffset.UtcNow);
             foreach (var client in clients)
                 client.Enqueue(type, ts, json);
         }
@@ -176,6 +190,15 @@ public sealed class BeaconServer : IDisposable
                     total += client.Dropped;
             }
             return total;
+        }
+    }
+
+    /// <summary>Memory held by every client's queued, not-yet-written messages.</summary>
+    internal long QueuedBytes
+    {
+        get
+        {
+            lock (_gate) return _clients.Sum(c => c.QueuedBytes);
         }
     }
 
@@ -230,13 +253,29 @@ public sealed class BeaconServer : IDisposable
                 continue;
             }
 
-            var connection = new BeaconClientConnection(tcp, _queueCapacity, ct);
+            // Over the limit: refuse before the connection costs anything. Only this loop adds
+            // clients, so the count can only fall between this check and the add below.
+            bool full;
+            lock (_gate) full = _clients.Count >= _maxClients;
+            if (full)
+            {
+                try { tcp.Close(); } catch { /* already gone */ }
+                if (!_refusalLogged)
+                {
+                    _refusalLogged = true; // once per stretch at the limit, not per attempt
+                    _log?.Invoke($"refused a connection: {_maxClients} clients already connected");
+                }
+                continue;
+            }
+
+            var connection = new BeaconClientConnection(tcp, _queueCapacity, _maxQueueBytes, ct);
             connection.Closed += c =>
             {
                 lock (_gate)
                 {
                     if (_clients.Remove(c))
                         Interlocked.Add(ref _droppedFromClosed, c.Dropped);
+                    _refusalLogged = false;
                 }
                 c.Dispose();
                 _log?.Invoke("client disconnected");
@@ -274,14 +313,16 @@ public sealed class BeaconServer : IDisposable
         }
     }
 
-    /// <summary>Broadcast bye, drain briefly so it actually leaves, then tear everything down.</summary>
+    /// <summary>Broadcast bye, drain briefly so it actually leaves, then tear everything down.
+    /// Clients drain together: NINA runs plugin teardown synchronously on exit, so the grace period
+    /// is paid once, however many readers are stuck.</summary>
     public async Task ShutdownAsync(string reason)
     {
         Broadcast("bye", new ByePayload(reason));
         BeaconClientConnection[] clients;
         lock (_gate) { clients = _clients.ToArray(); _clients.Clear(); }
-        foreach (var client in clients)
-            await client.DrainAndCloseAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+        await Task.WhenAll(clients.Select(c => c.DrainAndCloseAsync(TimeSpan.FromSeconds(2))))
+            .ConfigureAwait(false);
         Dispose();
     }
 

@@ -229,4 +229,30 @@ public class SequenceWatcherTests
         Assert.False(watcher.Summary.Running);
         Assert.Null(watcher.Summary.Instruction);
     }
+
+    [Fact]
+    public async Task Once_disposed_the_poll_is_no_longer_touching_ninas_sequencer()
+    {
+        // NINA tears plugins down on exit and on disable. A poll tick still running after teardown
+        // is our code walking NINA's sequencer while NINA dismantles it.
+        using var server = new BeaconServer(port: 0);
+        var inTick = new ManualResetEventSlim();
+        var tickFinished = 0;
+        var mediator = Substitute.For<ISequenceMediator>();
+        mediator.Initialized.Returns(true);
+        mediator.IsAdvancedSequenceRunning().Returns(_ =>
+        {
+            inTick.Set();
+            Thread.Sleep(300); // a slow read of NINA's state, in flight when teardown lands
+            Interlocked.Exchange(ref tickFinished, 1);
+            return false;
+        });
+
+        var watcher = new SequenceWatcher(mediator, server, pollInterval: FastPoll);
+        Assert.True(inTick.Wait(TimeSpan.FromSeconds(5)), "the poll never ran");
+        watcher.Dispose();
+
+        Assert.Equal(1, Volatile.Read(ref tickFinished));
+        await Task.CompletedTask;
+    }
 }

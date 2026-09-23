@@ -4,7 +4,7 @@ using Xunit;
 namespace AstralWarden.Nina.Beacon.Tests;
 
 /// <summary>
-/// The heartbeat, sequence poll and APPM poll all run on this. A background loop that
+/// The heartbeat and sequence poll both run on this. A background loop that
 /// dies to an unanticipated exception is a feed that goes silent with no signal at all — the one
 /// failure mode the Beacon must not have.
 /// </summary>
@@ -44,7 +44,7 @@ public class PeriodicLoopTests
         using var cts = new CancellationTokenSource();
         var logs = new List<string>();
         var ticks = 0;
-        var loop = PeriodicLoop.RunAsync("appm poll", Tick,
+        var loop = PeriodicLoop.RunAsync("sequence poll", Tick,
             () => { Interlocked.Increment(ref ticks); throw new InvalidOperationException("boom"); },
             log: m => { lock (logs) logs.Add(m); }, cts.Token);
 
@@ -55,7 +55,7 @@ public class PeriodicLoopTests
         lock (logs)
         {
             var line = Assert.Single(logs); // not one per tick — this floods NINA's log otherwise
-            Assert.Contains("appm poll", line);
+            Assert.Contains("sequence poll", line);
             Assert.Contains("boom", line);
         }
     }
@@ -77,29 +77,13 @@ public class PeriodicLoopTests
     }
 
     [Fact]
-    public async Task TickImmediately_runs_before_the_first_interval()
+    public async Task The_first_tick_waits_for_the_interval()
     {
-        using var cts = new CancellationTokenSource();
-        var ticked = new TaskCompletionSource();
-        var loop = PeriodicLoop.RunAsync("test", TimeSpan.FromMinutes(10),
-            () => ticked.TrySetResult(), log: null, cts.Token, tickImmediately: true);
-
-        await ticked.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        cts.Cancel();
-        await loop;
-    }
-
-    [Fact]
-    public async Task Without_it_the_first_tick_waits_for_the_interval()
-    {
-        // tickImmediately is opt-in, and only the APPM poll opts in — with a stated reason (catch a
-        // model-building session already underway). The other two loops are constructed inside the
-        // plugin constructor, which is exactly the moment NINA's mediators are not yet wired up:
-        // ch.4's first landmine is "never subscribe eagerly in a constructor", and an at-once tick
-        // is the same mistake by another route. If the default flipped, every Beacon start would
-        // poll the sequencer and beat the heartbeat before composition had finished.
-        // Both overloads: the async one drives the APPM poll, the sync one the heartbeat and the
-        // sequence poll, and they carry the default separately.
+        // The loops are constructed inside the plugin constructor, which is exactly the moment
+        // NINA's mediators are not yet wired up: ch.4's first landmine is "never subscribe eagerly
+        // in a constructor", and an at-once tick is the same mistake by another route. An
+        // immediate tick would poll the sequencer and beat the heartbeat before composition had
+        // finished. Both overloads are checked: the sync one wraps the async one.
         using var cts = new CancellationTokenSource();
         var syncTicks = 0;
         var asyncTicks = 0;

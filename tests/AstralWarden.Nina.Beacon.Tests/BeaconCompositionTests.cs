@@ -1,6 +1,5 @@
 using System.Reflection;
 using AstralWarden.Nina.Beacon.Instructions;
-using AstralWarden.Nina.Beacon.Optional;
 using AstralWarden.Nina.Beacon.Server;
 using AstralWarden.Nina.Beacon.Watchers;
 using NINA.Equipment.Interfaces.Mediator;
@@ -18,7 +17,7 @@ namespace AstralWarden.Nina.Beacon.Tests;
 /// produces. Nothing downstream can tell that a feed is missing: the heartbeat keeps reporting, the
 /// socket stays up, and the owner simply never sees mount pointing, or the autofocus curve, or the
 /// Target Scheduler feed again. So the set of feeds is asserted directly, against ch.4's message
-/// table (ten device kinds, plus image, autofocus, sequence, mount events, Target Scheduler, APPM).
+/// table (ten device kinds, plus image, autofocus, sequence, mount events, Target Scheduler).
 ///
 /// The static hand-off to the sequencer instruction is here too: NINA instantiates
 /// SendWardenAlertInstruction itself, so BeaconRuntime is the only route from a user's sequence to
@@ -26,8 +25,17 @@ namespace AstralWarden.Nina.Beacon.Tests;
 /// it runs, and no alert is ever sent.
 /// </summary>
 [Collection("BeaconRuntime")]
-public class BeaconCompositionTests
+public class BeaconCompositionTests : IDisposable
 {
+    // Each test gets its own instance-guard name, so a real NINA with the Beacon loaded on the same
+    // machine can't make these tests see "another instance".
+    private readonly string _previousInstanceName = Beacon.InstanceName;
+
+    public BeaconCompositionTests() =>
+        Beacon.InstanceName = $"Local\\AstralWardenBeaconTest-{Guid.NewGuid():N}";
+
+    public void Dispose() => Beacon.InstanceName = _previousInstanceName;
+
     private static Beacon Compose() => new(
         Substitute.For<IProfileService>(),
         Substitute.For<ICameraMediator>(),
@@ -52,6 +60,44 @@ public class BeaconCompositionTests
         .ToList();
 
     [Fact]
+    public async Task A_second_nina_instance_stays_off_for_its_whole_session()
+    {
+        // Another NINA instance on this PC already runs the Beacon. This one must not listen,
+        // watch or register with anything, so it can never take over the socket and feed the
+        // agent a different rig. Its alert instruction must still validate: the plugin is off by
+        // design, not broken, and a failed check would put NINA's "start anyway?" prompt in front
+        // of that instance's sequence.
+        using var otherInstance = SingleInstanceGuard.TryClaim(Beacon.InstanceName);
+        Assert.NotNull(otherInstance);
+        BeaconRuntime.Broadcast = null;
+
+        var camera = Substitute.For<ICameraMediator>();
+        var beacon = new Beacon(
+            Substitute.For<IProfileService>(), camera,
+            Substitute.For<IFocuserMediator>(), Substitute.For<IRotatorMediator>(),
+            Substitute.For<ISafetyMonitorMediator>(), Substitute.For<IFlatDeviceMediator>(),
+            Substitute.For<ISwitchMediator>(), Substitute.For<IWeatherDataMediator>(),
+            Substitute.For<ITelescopeMediator>(), Substitute.For<IFilterWheelMediator>(),
+            Substitute.For<IGuiderMediator>(), Substitute.For<IImageSaveMediator>(),
+            Substitute.For<ISequenceMediator>(), Substitute.For<IMessageBroker>());
+        try
+        {
+            Assert.Empty(WatcherTypes(beacon));
+            Assert.Null(typeof(Beacon).GetField("_server", BindingFlags.NonPublic | BindingFlags.Instance)!
+                .GetValue(beacon));
+            Assert.Empty(camera.ReceivedCalls());
+            Assert.True(new SendWardenAlertInstruction().Validate());
+        }
+        finally
+        {
+            await beacon.Teardown();
+        }
+
+        // Still refused after its own teardown: it never held the claim, so it never released it.
+        Assert.Null(SingleInstanceGuard.TryClaim(Beacon.InstanceName));
+    }
+
+    [Fact]
     public async Task Every_documented_feed_is_registered()
     {
         var beacon = Compose();
@@ -70,7 +116,6 @@ public class BeaconCompositionTests
                 typeof(SequenceWatcher),        // sequence.state
                 typeof(MountEventWatcher),      // mount.event
                 typeof(TargetSchedulerWatcher), // ts.*
-                typeof(AppmPoller),             // appm.model
             };
 
             var registered = WatcherTypes(beacon);
@@ -93,8 +138,8 @@ public class BeaconCompositionTests
     public async Task Every_late_joiner_replay_is_hooked_up_and_unhooked_at_teardown()
     {
         // ch.4: "Late joiners start from truth" — current device state (ten kinds), the last
-        // sequence.state, the last ts.targetstart and the cached appm.model are re-broadcast when a
-        // client connects. That is thirteen handlers on the server's ClientConnected, and it is the
+        // sequence.state and the last ts.targetstart are re-broadcast when a client connects.
+        // That is twelve handlers on the server's ClientConnected, and it is the
         // one place the wiring is observable from outside: a feed that was never registered has no
         // handler, and a feed left registered after teardown fires into a disposed server on the
         // next agent reconnect, for as long as NINA runs.
@@ -103,7 +148,7 @@ public class BeaconCompositionTests
             .GetField("_server", BindingFlags.NonPublic | BindingFlags.Instance)!
             .GetValue(beacon)!;
 
-        Assert.Equal(13, ClientConnectedSubscribers(server));
+        Assert.Equal(12, ClientConnectedSubscribers(server));
 
         await beacon.Teardown();
 
@@ -212,17 +257,11 @@ public class BeaconCompositionTests
     {
         // BeaconRuntime is the only path from a MEF-instantiated sequence item to the server.
         BeaconRuntime.Broadcast = null;
-        BeaconRuntime.ClientCount = null;
 
         var beacon = Compose();
         try
         {
             Assert.NotNull(BeaconRuntime.Broadcast);
-            Assert.NotNull(BeaconRuntime.ClientCount);
-            // The instruction validates clean only when the Beacon is running AND an agent is
-            // connected; with the Beacon up and nobody listening it must say so rather than
-            // pretending the alert would arrive.
-            Assert.Equal(0, BeaconRuntime.ClientCount!());
 
             var instruction = new SendWardenAlertInstruction { Title = "test", Severity = "warn" };
             await instruction.Execute(null!, CancellationToken.None);
@@ -235,6 +274,5 @@ public class BeaconCompositionTests
         // Cleared on teardown, so an instruction left in a sequence after the plugin unloads is a
         // no-op rather than a call into a disposed server.
         Assert.Null(BeaconRuntime.Broadcast);
-        Assert.Null(BeaconRuntime.ClientCount);
     }
 }

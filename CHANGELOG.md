@@ -7,6 +7,26 @@ release is the tag of the same name.
 
 ## Unreleased
 
+- **The alert instruction no longer blocks a sequence from starting when the agent isn't connected.**
+  NINA shows any validation issue as a "start anyway?" prompt when a sequence starts, so an agent
+  that was restarting or not yet installed could hold up a night. Validation now fails only if the
+  Beacon itself failed to start.
+- **Copying the alert instruction keeps its on-error behaviour and attempt count.** Duplicating it,
+  or loading it from a template, used to reset both to NINA's defaults.
+- **Only one NINA instance per PC runs the Beacon.** The first instance to load it is monitored. A
+  later instance shows a notification and stays off for its session. Before, a second instance
+  took over the socket when the first closed, so the agent could receive another rig's data.
+- **Memory is bounded.** At most two clients can connect (a third is closed at once), and each
+  client's backlog drops oldest past 8 MB as well as past 2000 messages.
+- **No work when nobody is listening.** With no client connected, a saved frame costs nothing: no
+  thumbnail encode, star mapping or serialization on NINA's save thread.
+- **Faster, cleaner shutdown.** Connected clients share one two-second window to receive `bye`,
+  instead of two seconds each, so NINA closes sooner. Teardown also waits (bounded) for background
+  polls to finish, so none is still reading NINA's sequencer afterwards.
+- A device watcher whose registration with NINA failed no longer leaves a handler behind.
+- **Removed:** `appm.model`. The plugin no longer polls Astro-Physics APPM's local HTTP API.
+  Nothing read the data, and the Beacon now opens no connection of its own.
+
 ## 1.3.2.1
 
 First public release, and the first listed in NINA's plugin manager. The version jumps to 1.x to

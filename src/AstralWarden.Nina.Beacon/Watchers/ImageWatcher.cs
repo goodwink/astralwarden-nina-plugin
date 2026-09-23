@@ -45,6 +45,10 @@ public sealed class ImageWatcher : IDisposable
     {
         try
         {
+            // Everything below exists only to be sent. With no reader connected, spend nothing on
+            // NINA's save thread. There is no late-joiner replay for frames, so nothing is lost.
+            if (_server.ClientCount == 0) return;
+
             // Mapping lives in ImageSavedMapper (pure, directly tested); this handler only supplies
             // the two things that need live NINA state: the reflection-derived detector/extras and
             // the camera's sensor dimensions.

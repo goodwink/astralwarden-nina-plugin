@@ -74,32 +74,29 @@ public class SendWardenAlertInstruction : SequenceItem, IValidatable
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// NINA shows every validation issue as a modal "start anyway?" prompt, defaulting to Cancel,
+    /// when the sequence starts. So the only issue raised is a broken plugin. An agent that isn't
+    /// connected right now (restarting, updating, not installed yet) is normal and must never stop
+    /// the user's sequence from starting.
+    /// </summary>
     public bool Validate()
     {
         var issues = new List<string>();
-        try
-        {
-            if (BeaconRuntime.Broadcast is null)
-                issues.Add("Astral Warden Beacon is not running");
-            else if (BeaconRuntime.ClientCount?.Invoke() == 0)
-                issues.Add("Astral Warden agent is not connected (the alert would go nowhere)");
-        }
-        catch
-        {
-            // Validate runs on the sequencer UI path; report clean rather than throwing at it.
-        }
+        if (BeaconRuntime.Broadcast is null)
+            issues.Add("Astral Warden Beacon is not running");
         Issues = issues;
         return issues.Count == 0;
     }
 
-    public override object Clone() => new SendWardenAlertInstruction
+    // NINA's convention: the base copy constructor carries the shared metadata (icon, name,
+    // category, description, attempts, error behaviour), so a copy keeps what the user set.
+    private SendWardenAlertInstruction(SendWardenAlertInstruction cloneMe) : base(cloneMe)
     {
-        Title = Title,
-        Severity = Severity,
-        Message = Message,
-        Icon = Icon,
-        Name = Name,
-        Category = Category,
-        Description = Description,
-    };
+        _title = cloneMe._title;
+        _severity = cloneMe._severity;
+        _message = cloneMe._message;
+    }
+
+    public override object Clone() => new SendWardenAlertInstruction(this);
 }

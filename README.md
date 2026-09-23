@@ -17,15 +17,21 @@ built never to get in NINA's way:
 - **Read-only.** The Beacon observes NINA through its public mediators and events. It commands no
   device and changes no NINA state. Clients connect and read; the socket accepts no requests,
   acknowledgements or commands of any kind.
-- **Never blocks NINA.** Each client has a bounded queue that drops its oldest messages when full.
-  A slow or stuck reader loses messages (visible as gaps in `seq`) rather than slowing NINA. The
-  work done on NINA's own threads is CPU-only over in-memory data, holds no lock, and does no I/O.
+- **Never blocks NINA.** Each client has a queue that drops its oldest messages once it holds
+  2000 messages or 8 MB, and at most two clients can connect. A slow or stuck reader loses messages
+  (visible as gaps in `seq`) rather than slowing NINA or growing its memory. The work done on
+  NINA's own threads is CPU-only over in-memory data and does no I/O, and with no client connected
+  it is skipped entirely.
+- **Stops cleanly.** On disable or shutdown the Beacon removes every handler it attached to NINA,
+  waits (briefly, with a bound) for its background work to finish, and gives connected clients one
+  shared two-second window to receive the final `bye`.
+- **One NINA instance per PC.** If you run several NINA instances, the first one to load the Beacon
+  is monitored. The others show a notification and stay off; they never take over.
 - **Fails quietly.** Every watcher is isolated. If a port is busy, a device driver throws, or an
   optional plugin is missing, that one feed goes quiet and is retried; nothing is thrown into
   NINA.
-- **Sends nothing off the PC.** The Beacon makes no outbound network connection. The only other
-  local endpoint it touches is APPM's HTTP API on `127.0.0.1:60011`, GET-only, polled while APPM
-  is running.
+- **Sends nothing off the PC.** The Beacon makes no network connection of its own, local or
+  remote. Its only socket is the loopback listener that clients connect to.
 
 ## What it streams
 
@@ -39,11 +45,10 @@ built never to get in NINA's way:
 | Sequence running chain, current instruction and target | `ISequenceMediator` (2s change poll) |
 | Mount lifecycle (slew, park, home, meridian flip) | `ITelescopeMediator` events |
 | Target Scheduler wait / target start / complete context | NINA `IMessageBroker` (Target Scheduler ≥ 4.8) |
-| APPM pointing-model points + residual RMS (cached) | APPM local HTTP API, GET-only |
 | `alert.custom`, from the **Send Astral Warden alert** sequencer instruction | `ISequenceItem` export |
 
 Everything degrades gracefully. Without Hocus Focus you get stock quality only; without Target
-Scheduler or APPM those feeds are silent.
+Scheduler that feed is silent.
 
 ## Install
 

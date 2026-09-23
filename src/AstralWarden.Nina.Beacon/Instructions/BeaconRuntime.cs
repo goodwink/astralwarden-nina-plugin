@@ -9,7 +9,4 @@ public static class BeaconRuntime
 {
     /// <summary>Broadcast delegate (type, payload) — null until the Beacon has started.</summary>
     public static volatile Action<string, object>? Broadcast;
-
-    /// <summary>Connected-client count for instruction validation hints.</summary>
-    public static volatile Func<int>? ClientCount;
 }
