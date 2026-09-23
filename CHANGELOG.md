@@ -7,14 +7,23 @@ release is the tag of the same name.
 
 ## Unreleased
 
-## 1.3.2.0
+## 1.3.2.1
 
-First public release, and the first listed in NINA's plugin manager. Functionally the same as
-0.3.2. The version jumps to 1.x to mark it as the first release for general use.
+First public release, and the first listed in NINA's plugin manager. The version jumps to 1.x to
+mark it as the first release for general use.
 
+- **Fixed:** if NINA disabled or shut down the plugin while it was still subscribing to NINA's
+  events at startup, some of its event handlers could stay attached to NINA's mediators and fire
+  into a stopped plugin on the next mount, image-saved or sequence event. Teardown now waits for an
+  in-progress subscription and then removes every handler.
 - Published under MPL-2.0 by Astral Warden, LLC, from
   [github.com/goodwink/astralwarden-nina-plugin](https://github.com/goodwink/astralwarden-nina-plugin).
 - Built and released by CI from a tag. The release carries the plugin zip and its NINA manifest.
+
+## 1.3.2.0
+
+Tagged but never released: its release run stopped at the test step, which caught the teardown
+bug fixed in 1.3.2.1. Otherwise the same as 0.3.2.
 
 ## 0.3.2
 

@@ -10,7 +10,7 @@
       folder holds a newer build, so two different builds sharing one version means the rig can keep
       running the old DLL while the version it reports says otherwise.
     -->
-    <BeaconVersion>1.3.2.0</BeaconVersion>
+    <BeaconVersion>1.3.2.1</BeaconVersion>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
