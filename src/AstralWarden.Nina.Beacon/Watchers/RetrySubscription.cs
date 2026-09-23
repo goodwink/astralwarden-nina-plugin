@@ -16,6 +16,12 @@ public sealed class RetrySubscription : IDisposable
     private readonly Action<string>? _log;
     private readonly string _name;
     private readonly CancellationTokenSource _cts = new();
+    // Subscribe and teardown take this lock, so Dispose can never run in the middle of a subscribe.
+    // Without it, a teardown that lands while the group is part-way through subscribing reads "not
+    // subscribed", skips the unsubscribe, and the subscribe then finishes, leaving our handlers on
+    // NINA's mediator (which outlives the plugin) to fire into a disposed server.
+    private readonly object _gate = new();
+    private bool _disposed;
     private volatile bool _subscribed;
 
     public RetrySubscription(string name, Action subscribe, Action unsubscribe,
@@ -38,8 +44,12 @@ public sealed class RetrySubscription : IDisposable
         {
             try
             {
-                _subscribe();
-                _subscribed = true;
+                lock (_gate)
+                {
+                    if (_disposed) return;
+                    _subscribe();
+                    _subscribed = true;
+                }
                 _log?.Invoke($"{_name}: subscribed (attempt {attempts + 1})");
                 return;
             }
@@ -54,11 +64,16 @@ public sealed class RetrySubscription : IDisposable
 
     public void Dispose()
     {
-        _cts.Cancel();
-        _cts.Dispose();
-        if (_subscribed)
+        lock (_gate)
         {
-            try { _unsubscribe(); } catch { /* mediator torn down first */ }
+            if (_disposed) return;
+            _disposed = true;
+            _cts.Cancel();
+            if (_subscribed)
+            {
+                try { _unsubscribe(); } catch { /* mediator torn down first */ }
+            }
         }
+        _cts.Dispose();
     }
 }
