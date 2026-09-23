@@ -203,7 +203,7 @@ silent when TS isn't installed. Last `ts.targetstart` re-broadcasts to late join
 - HocusFocus tilt/aberration model per AF run — only via HF assembly reference or its per-region
   report files; revisit if grid-based tilt from `image.stars` proves insufficient.
 - TS progress stats via broker — upstream proposal to tcpalmer (see ts section).
-- `appm.model` (Astro-Physics APPM pointing-model points) — removed after 1.3.2.1 because nothing
+- `appm.model` (Astro-Physics APPM pointing-model points) — removed in 1.3.3.0 because nothing
   consumed it. If restored, poll APPM's local API only while an Astro-Physics mount is connected.
   The live APCC model stays out of reach either way: APCC's only known API is a raw serial-command
   passthrough that can command the mount.

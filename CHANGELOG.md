@@ -7,6 +7,8 @@ release is the tag of the same name.
 
 ## Unreleased
 
+## 1.3.3.0
+
 - **The alert instruction no longer blocks a sequence from starting when the agent isn't connected.**
   NINA shows any validation issue as a "start anyway?" prompt when a sequence starts, so an agent
   that was restarting or not yet installed could hold up a night. Validation now fails only if the
