@@ -122,7 +122,8 @@ jobs:
           PAT: ${{ secrets.PAT }}
         run: |
           if [ -z "$PAT" ]; then
-            echo "::notice::No PAT secret, so the manifest was not staged. The release itself is published."
+            # A warning, not a notice: the run still goes green, and a notice is easy to miss.
+            echo "::warning::No PAT secret on this repository, so the manifest was NOT staged on the fork. The release itself is published. Add the fork token as the PAT Actions secret here (not on any other repo), then re-run this job."
             echo "present=false" >> "$GITHUB_OUTPUT"
           else
             echo "present=true" >> "$GITHUB_OUTPUT"
@@ -177,4 +178,5 @@ jobs:
             echo "### Manifest staged"
             echo "Branch \`$BRANCH\` on ${{ github.repository_owner }}/nina.plugin.manifests, at \`$DEST/manifest.json\`."
             echo "Open the pull request: https://github.com/isbeorn/nina.plugin.manifests/compare/main...${{ github.repository_owner }}:nina.plugin.manifests:$BRANCH?expand=1"
+            echo "PR body: fill in docs/manifest-pr-template.md (checksum: \`$(jq -r .Installer.Checksum "$SRC")\`)."
           } >> "$GITHUB_STEP_SUMMARY"

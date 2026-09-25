@@ -118,7 +118,14 @@ To release:
    - publishes a GitHub Release carrying the zip and the manifest;
    - pushes the manifest to a branch of the maintainer's fork of
      [`nina.plugin.manifests`](https://github.com/isbeorn/nina.plugin.manifests).
-4. The maintainer opens the manifest pull request by hand.
+4. The maintainer opens the manifest pull request by hand, with the body from
+   [`docs/manifest-pr-template.md`](docs/manifest-pr-template.md). The link to open it is in the
+   release run's summary.
+
+One-time setup for step 3's last part: the maintainer's fork must be named exactly
+`nina.plugin.manifests`, and a fine-grained token with Contents: write on that fork must be stored
+as the `PAT` Actions secret **on this repository**. Without it the release still publishes, and the
+run warns that the manifest wasn't staged.
 
 A published release asset is never replaced, because the manifest pins its checksum. A fix ships as
 a new version.
